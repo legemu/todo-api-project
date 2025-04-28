@@ -1,91 +1,101 @@
-// server.js
-// A simple Express.js backend for a Todo list API
-
 const express = require('express');
+const path = require('path');
+const sqlite3 = require('sqlite3').verbose();
 const app = express();
-const path = require("path");
 const PORT = process.env.PORT || 3000;
 
-// Middleware to parse JSON requests
+// Middleware to parse JSON
 app.use(express.json());
 
-// TODO ➡️  Middleware to inlcude static content from 'public' folder
+// Serve static files from 'public' folder
+app.use(express.static(path.join(__dirname, 'public')));
 
-app.use(express.static(path.join(__dirname,'public')));
+// Connect to SQLite database
+const db = new sqlite3.Database('./todos.db');
 
-// In-memory array to store todo items
-let todos = [];
-let nextId = 1;
-
-// TODO ➡️ serve index.html from 'public' at the '/' path
-
-app.get('/', (req, res) => { 
-  res.sendFile('index.html')
+// Create todos table if it doesn't exist
+db.serialize(() => {
+  db.run(`CREATE TABLE IF NOT EXISTS todos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    priority TEXT DEFAULT 'low',
+    isComplete BOOLEAN DEFAULT 0,
+    isFun BOOLEAN DEFAULT 0
+  )`);
 });
-       
-        
-// TODO ➡️ GET all todo items at the '/todos' path
 
+// Serve index.html at the root path
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// GET all todo items
 app.get('/todos', (req, res) => {
-  res.json(todos);
+  db.all('SELECT * FROM todos', (err, rows) => {
+    if (err) {
+      res.status(500).json({ message: 'Database error' });
+    } else {
+      res.json(rows);
+    }
+  });
 });
-
 
 // GET a specific todo item by ID
 app.get('/todos/:id', (req, res) => {
   const id = parseInt(req.params.id);
-  const todo = todos.find(item => item.id === id);
-  if (todo) {
-    res.json(todo);
-  } else {
-    // TODO ➡️ handle 404 status with a message of { message: 'Todo item not found' }
-    res.status(404).json({message: 'Todo item not found'});
-  }
+  db.get('SELECT * FROM todos WHERE id = ?', [id], (err, row) => {
+    if (err) {
+      res.status(500).json({ message: 'Database error' });
+    } else if (!row) {
+      res.status(404).json({ message: 'Todo item not found' });
+    } else {
+      res.json(row);
+    }
+  });
 });
 
 // POST a new todo item
 app.post('/todos', (req, res) => {
-  const { name, priority = 'low', isFun } = req.body;
+  const { name, priority = 'low', isFun = false } = req.body;
 
   if (!name) {
     return res.status(400).json({ message: 'Name is required' });
   }
 
-  const newTodo = {
-    id: nextId++,
-    name,
-    priority,
-    isComplete: false,
-    isFun
-  };
-  
-  todos.push(newTodo);
-
-  // TODO ➡️ Log every incoming TODO item in a 'todo.log' file @ the root of the project
-  // In your HW, you'd INSERT a row in your db table instead of writing to file or push to array!
-  
-  
-
-  res.status(201).json(newTodo);
+  db.run(
+    'INSERT INTO todos (name, priority, isComplete, isFun) VALUES (?, ?, ?, ?)',
+    [name, priority, 0, isFun ? 1 : 0],
+    function(err) {
+      if (err) {
+        res.status(500).json({ message: 'Database error' });
+      } else {
+        res.status(201).json({
+          id: this.lastID,
+          name,
+          priority,
+          isComplete: 0,
+          isFun: isFun ? 1 : 0
+        });
+      }
+    }
+  );
 });
 
-// DELETE a todo item by ID
+// DELETE a todo item
 app.delete('/todos/:id', (req, res) => {
   const id = parseInt(req.params.id);
-  const index = todos.findIndex(item => item.id === id);
-
-  if (index !== -1) {
-    todos.splice(index, 1);
-    res.json({ message: `Todo item ${id} deleted.` });
-  } else {
-    res.status(404).json({ message: 'Todo item not found' });
-  }
+  db.run('DELETE FROM todos WHERE id = ?', [id], function(err) {
+    if (err) {
+      res.status(500).json({ message: 'Database error' });
+    } else if (this.changes === 0) {
+      res.status(404).json({ message: 'Todo item not found' });
+    } else {
+      res.json({ message: 'Todo item deleted successfully' });
+    }
+  });
 });
 
 // Start the server
-// TODO ➡️ Start the server by listening on the specified PORT
-
 app.listen(PORT, () => {
-  console.log(`Todo API server running on http://localhost:${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
 });
-
